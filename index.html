@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1 Rose, Every Language</title>
+<style>
+  html, body { margin: 0; background: #060208; height: 100%; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  canvas { width: 100%; max-width: 800px; height: auto; aspect-ratio: 1 / 1; display: block; }
+  p { color: #6b4a58; font: 13px sans-serif; margin: 8px 0 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p>Дахин тоглуулахын тулд зургийг товш</p>
+<script>
+const W = 800, H = 800;
+const DURATION = 10, TICK = 16, ANIM = 38, LIFT = 32, ROW = 17;
+const RIM_NARROW = 200, SEED = 17, BG = "#060208";
+
+const PHRASES = [
+  "I LOVE YOU", "I love you", "Te amo", "Ti amo", "Je t'aime",
+  "Ich liebe dich", "Eu te amo", "Seni seviyorum", "Я тебя люблю",
+  "TE QUIERO", "AMOR", "AMOUR", "LOVE", "Ik hou van jou", "Jeg elsker dig",
+  "Jag älskar dig", "Kocham cię", "Szeretlek", "Nakupenda", "Mahal kita",
+  "Anh yêu em", "Aku cinta kamu", "Ljubim te", "Miluji tě", "Rakastan sinua",
+  "Σ' αγαπώ", "愛してる", "我爱你", "사랑해", "ฉันรักเธอ", "Би чамд хайртай",
+  "मैं तुमसे प्यार करता हूँ", "Volim te", "Te iubesc", "Mīlu tevi",
+  "Ég elska þig", "Ti voglio bene", "Te quiero", "Mi amas vin"
+];
+
+// ---------- санамсаргүй тоо (тогтмол seed) ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- сарнайн хэлбэр ----------
+const BX = 400, BT = 88, BB = 528, BCY = 262;
+const rad = d => d * Math.PI / 180;
+
+function inBloom(x, y) {
+  const yy = y + 10 * Math.cos((x - BX) / 34);
+  const t = (yy - BT) / (BB - BT);
+  if (t <= 0 || t >= 1) return false;
+  return Math.abs(x - BX) < 292 * Math.sin(Math.PI * Math.sqrt(t));
+}
+function inStem(x, y) {
+  if (y < 505 || y > 792) return false;
+  return Math.abs(x - (BX + 6 * Math.sin((y - 505) / 70))) < 30 - (y - 505) * 0.025;
+}
+function inLeaf(x, y, cx, cy, ang, a = 105, b = 30) {
+  const dx = x - cx, dy = y - cy;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const u = dx * c + dy * s, v = -dx * s + dy * c;
+  if (Math.abs(u) >= a) return false;
+  return Math.abs(v) < b * 1.25 * Math.pow(1 - Math.abs(u) / a, 0.6);
+}
+function inLeaves(x, y) {
+  return inLeaf(x, y, 300, 625, rad(22)) || inLeaf(x, y, 505, 590, rad(-22));
+}
+function region(x, y) {
+  if (inBloom(x, y)) return "bloom";
+  if (inStem(x, y) || inLeaves(x, y)) return "green";
+  return null;
+}
+
+// ---------- өнгө ----------
+function bloomBrightness(x, y) {
+  const dx = (x - BX) / 292, dy = (y - BCY) / 200;
+  const d = Math.hypot(dx, dy), th = Math.atan2(dy, dx);
+  let frac = (d * 3.6 - th / (2 * Math.PI) * 2.0 + 0.10 * Math.sin(5 * th)) % 1.0;
+  if (frac < 0) frac += 1;
+  return 0.16 + 0.84 * Math.pow(frac, 1.3);
+}
+
+// ---------- үгсийг байрлуулах ----------
+function fontStr(size, bold) {
+  return (bold ? "bold " : "") + Math.round(size * 1.33) + 'px Georgia, "Times New Roman", serif';
+}
+
+function buildWords(ctx) {
+  const rand = mulberry32(SEED);
+  const choice = a => a[Math.floor(rand() * a.length)];
+  const randint = (a, b) => a + Math.floor(rand() * (b - a + 1));
+
+  function pickColor(x, y, rg) {
+    if (rg === "green") {
+      const base = choice([[46, 190, 74], [31, 157, 58], [73, 209, 95]]);
+      const k = 0.65 + 0.35 * rand();
+      return base.map(v => Math.floor(v * k));
+    }
+    const b = bloomBrightness(x, y);
+    const base = [232, 24 + randint(-10, 14), 58 + randint(-8, 8)];
+    let c = base.map(v => v * b);
+    if (b > 0.88) {
+      const t = (b - 0.88) / 0.12 * 0.45;
+      c = c.map((a, i) => a + ([255, 130, 150][i] - a) * t);
+    }
+    return c.map(v => Math.floor(v));
+  }
+
+  const words = [];
+  for (let y = 80; y < H - 6; y += ROW) {
+    const segs = [];
+    let start = null, cur = null;
+    for (let x = 0; x < W; x += 2) {
+      const rg = region(x, y);
+      if (rg && start === null) { start = x; cur = rg; }
+      else if (start !== null && (!rg || rg !== cur)) {
+        segs.push([start, x, cur]);
+        if (rg) { start = x; cur = rg; } else { start = null; cur = null; }
+      }
+    }
+    if (start !== null) segs.push([start, W, cur]);
+
+    for (const [x0, x1, rg] of segs) {
+      if (x1 - x0 < 22) continue;
+      const row = [];
+      let x = x0, fails = 0;
+      while (fails < 40) {
+        const size = rg === "green" ? randint(8, 12) : randint(9, 15);
+        const font = fontStr(size, rand() < 0.55);
+        const p = choice(PHRASES);
+        ctx.font = font;
+        const w = ctx.measureText(p).width;
+        if (x + w > x1) { fails++; continue; }
+        row.push({ p, font, x, w });
+        x += w + 6;
+      }
+      if (!row.length) continue;
+      const last = row[row.length - 1];
+      const shift = ((x1 - x0) - (last.x + last.w - x0)) / 2;
+      const narrow = (x1 - x0) < RIM_NARROW;
+      row.forEach((r, i) => {
+        const cx = r.x + r.w / 2 + shift;
+        const rim = rg === "bloom" && (narrow || i === 0 || i === row.length - 1);
+        words.push({ text: r.p, font: r.font, x: cx, y, rg, rim,
+                     color: `rgb(${pickColor(cx, y, rg).join(",")})` });
+      });
+    }
+  }
+  return words;
+}
+
+// ---------- animation ----------
+const canvas = document.getElementById("c");
+const dpr = Math.min(window.devicePixelRatio || 1, 3);
+canvas.width = W * dpr;
+canvas.height = H * dpr;
+const ctx = canvas.getContext("2d");
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ctx.textAlign = "center";
+ctx.textBaseline = "middle";
+
+const words = buildWords(ctx);
+// дараалал (бүгд доороос дээш): 1) навч, иш  2) цэцгийн гадна хүрээ  3) дотор хэсэг
+words.sort((a, b) => {
+  const g = w => w.rg === "green" ? 0 : (w.rim ? 1 : 2);
+  return g(a) - g(b) || b.y - a.y || a.x - b.x;
+});
+const n = words.length;
+const total = Math.floor(DURATION * 1000 / TICK);
+const latestStart = Math.max(1, total - ANIM);
+words.forEach((w, i) => { w.start = Math.floor(i / Math.max(1, n - 1) * latestStart); });
+
+function draw(t) {
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = 'bold 40px Georgia, "Times New Roman", serif';
+  ctx.fillStyle = "#ff3d6e";
+  ctx.fillText("1 Rose, Every Language", W / 2, 38);
+  for (const w of words) {
+    if (w.start > t) break;
+    const k = Math.min(1, (t - w.start) / ANIM);
+    const e = 1 - Math.pow(1 - k, 3);
+    ctx.globalAlpha = e;
+    ctx.font = w.font;
+    ctx.fillStyle = w.color;
+    ctx.fillText(w.text, w.x, w.y + LIFT * (1 - e));
+  }
+  ctx.globalAlpha = 1;
+}
+
+let raf = 0;
+function play() {
+  cancelAnimationFrame(raf);
+  let t0 = null;
+  function frame(ts) {
+    if (t0 === null) t0 = ts;
+    const t = (ts - t0) / TICK;
+    draw(t);
+    if (t < total + ANIM + 2) raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
+}
+canvas.addEventListener("click", play);
+play();
+</script>
+</body>
+</html>
